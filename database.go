@@ -1,0 +1,61 @@
+package main
+
+import (
+	"database/sql"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+type Database struct {
+	db *sql.DB
+}
+
+func setupDatabase() (*Database, error) {
+	db, err := sql.Open("sqlite3", "./spotify_playlist_creator.db")
+	if err != nil {
+		return nil, err
+	}
+
+	// Create tables if they don't exist
+	_, err = db.Exec(`
+    CREATE TABLE IF NOT EXISTS cache (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        expiry INTEGER
+    );
+    `)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Database{db: db}, nil
+}
+
+func (d *Database) GetCache(key string) (string, bool) {
+	var value string
+	var expiry int64
+
+	row := d.db.QueryRow("SELECT value, expiry FROM cache WHERE key = ?", key)
+	if err := row.Scan(&value, &expiry); err != nil {
+		return "", false
+	}
+
+	if time.Now().Unix() > expiry {
+		// Expired
+		d.db.Exec("DELETE FROM cache WHERE key = ?", key)
+		return "", false
+	}
+
+	return value, true
+}
+
+func (d *Database) SetCache(key, value string, ttlSeconds int64) error {
+	expiry := time.Now().Unix() + ttlSeconds
+	_, err := d.db.Exec("INSERT OR REPLACE INTO cache (key, value, expiry) VALUES (?, ?, ?)", key, value, expiry)
+	return err
+}
+
+func (d *Database) Close() {
+	d.db.Close()
+}
