@@ -2,6 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -12,7 +15,17 @@ type Database struct {
 }
 
 func setupDatabase() (*Database, error) {
-	db, err := sql.Open("sqlite3", "./spotify_playlist_creator.db")
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	dbPath := filepath.Join(cacheDir, "spotify_playlist_creator", "spotify_playlist_creator.db")
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err
 	}
