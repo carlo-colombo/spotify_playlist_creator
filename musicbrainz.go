@@ -147,9 +147,12 @@ func (c *MusicBrainzClient) filterReleases(releases []MusicBrainzReleaseGroup) (
 	var singles []MusicBrainzReleaseGroup
 
 	for _, r := range releases {
-		if r.PrimaryType == "Album" && !isLiveOrRemix(r.Title) {
+		isStudioAlbum := r.PrimaryType == "Album" && !contains(r.SecondaryTypes, "Live") && !contains(r.SecondaryTypes, "Compilation")
+		isSingle := r.PrimaryType == "Single"
+
+		if isStudioAlbum {
 			studioAlbums = append(studioAlbums, r)
-		} else if r.PrimaryType == "Single" && !isLiveOrRemix(r.Title) {
+		} else if isSingle && !isLiveOrRemix(r.Title) {
 			singles = append(singles, r)
 		}
 	}
@@ -176,6 +179,16 @@ func (c *MusicBrainzClient) filterReleases(releases []MusicBrainzReleaseGroup) (
 	}
 
 	return latestAlbum, subsequentSingles
+}
+
+// Helper function to check if a string is in a slice of strings
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }
 
 func isLiveOrRemix(title string) bool {

@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
+	
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	db, err := setupDatabase()
@@ -46,33 +46,12 @@ func main() {
 	var allTrackURIs []string
 	for _, artistName := range artists {
 		fmt.Printf("Processing artist: %s\n", artistName)
-		// 1. Get artist ID from MusicBrainz
-		artistID, err := musicBrainzClient.GetArtistID(artistName)
+		trackURIs, err := processArtist(ctx, artistName, spotifyClient, musicBrainzClient)
 		if err != nil {
-			log.Printf("Error getting artist ID for %s: %v", artistName, err)
+			log.Printf("Error processing artist %s: %v", artistName, err)
 			continue
 		}
-
-		// 2. Get releases from MusicBrainz
-	releases, err := musicBrainzClient.GetLatestReleases(artistID)
-		if err != nil {
-			log.Printf("Error getting releases for %s: %v", artistName, err)
-			continue
-		}
-
-		// 3. Get tracks from Spotify
-		for _, release := range releases {
-			for _, trackTitle := range release.TrackTitles {
-				trackURI, err := spotifyClient.SearchTrack(ctx, trackTitle, artistName, release.Title)
-				if err != nil {
-					log.Printf("Error searching for track '%s' by '%s': %v", trackTitle, artistName, err)
-					continue
-				}
-				if trackURI != "" {
-					allTrackURIs = append(allTrackURIs, trackURI)
-				}
-			}
-		}
+		allTrackURIs = append(allTrackURIs, trackURIs...)
 	}
 
 	if len(allTrackURIs) == 0 {
@@ -156,19 +135,18 @@ func getArtists() ([]string, error) {
 	return artists, nil
 }
 
-func processArtist(ctx context.Context, artistName string, spotifyClient *SpotifyClient, musicBrainzClient *MusicBrainzClient, dryRun bool) {
-	fmt.Printf("Processing artist: %s\n", artistName)
+func processArtist(ctx context.Context, artistName string, spotifyClient *SpotifyClient, musicBrainzClient *MusicBrainzClient) ([]string, error) {
 
 	// 1. Get artist ID from MusicBrainz
 	artistID, err := musicBrainzClient.GetArtistID(artistName)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("error getting artist ID for %s: %w", artistName, err)
 	}
 
 	// 2. Get releases from MusicBrainz
 	releases, err := musicBrainzClient.GetLatestReleases(artistID)
 	if err != nil {
-		return
+		return nil, fmt.Errorf("error getting releases for %s: %w", artistName, err)
 	}
 
 	// 3. Get tracks from Spotify
@@ -177,6 +155,7 @@ func processArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 		for _, trackTitle := range release.TrackTitles {
 			trackURI, err := spotifyClient.SearchTrack(ctx, trackTitle, artistName, release.Title)
 			if err != nil {
+				log.Printf("Error searching for track '%s' by '%s': %v", trackTitle, artistName, err)
 				continue
 			}
 			if trackURI != "" {
@@ -185,39 +164,5 @@ func processArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 		}
 	}
 
-	if len(trackURIs) == 0 {
-		return
-	}
-
-	// 4. Create/Update playlist
-	playlistName := fmt.Sprintf("Latest from %s", artistName)
-
-	if dryRun {
-		fmt.Printf("Dry run: Would create/update playlist '%s'. Tracks to be added:\n", playlistName)
-		for _, trackURI := range trackURIs {
-			track, err := spotifyClient.GetTrackDetails(ctx, trackURI)
-			if err != nil {
-				fmt.Printf("\tError getting track details for %s: %v\n", trackURI, err)
-				continue
-			}
-			artistNames := []string{}
-			for _, artist := range track.Artists {
-				artistNames = append(artistNames, artist.Name)
-			}
-			fmt.Printf("\t- %s - %s (Album: %s)\n", strings.Join(artistNames, ", "), track.Name, track.Album.Name)
-		}
-		return
-	}
-
-	playlistID, err := spotifyClient.GetOrCreatePlaylist(ctx, playlistName)
-	if err != nil {
-		return
-	}
-
-	err = spotifyClient.AddTracksToPlaylist(ctx, playlistID, trackURIs)
-	if err != nil {
-		return
-	}
-
-	fmt.Printf("Successfully updated playlist for %s\n", artistName)
+	return trackURIs, nil
 }

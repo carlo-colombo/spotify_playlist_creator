@@ -10,9 +10,10 @@ type MusicBrainzArtist struct {
 }
 
 type MusicBrainzReleaseGroup struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	PrimaryType string `json:"primary-type"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	PrimaryType string   `json:"primary-type"`
+	SecondaryTypes []string `json:"secondary-types"`
 	FirstReleaseDate string `json:"first-release-date"`
 }
 
