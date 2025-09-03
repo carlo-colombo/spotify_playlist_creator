@@ -68,4 +68,5 @@ type TrackDetails struct {
 	Artist string
 	Album  string
 	Year   string
+	URI    string
 }
