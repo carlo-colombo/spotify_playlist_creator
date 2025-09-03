@@ -59,7 +59,7 @@ func main() {
 		return
 	}
 
-			sort.Strings(artists)
+	sort.Strings(artists)
 	playlistName := fmt.Sprintf("spc %s", strings.Join(artists, ","))
 
 	if *dryRun {
@@ -79,7 +79,7 @@ func main() {
 		return
 	}
 
-	playlist, err := spotifyClient.GetOrCreatePlaylist(ctx, playlistName)
+	playlist, err := spotifyClient.GetOrCreatePlaylist(ctx, playlistName, *dryRun)
 	if err != nil {
 		log.Fatalf("Error getting or creating playlist: %v", err)
 	}

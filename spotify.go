@@ -187,14 +187,11 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, sk
 		nextURL = playlists.Next
 	}
 
-	fmt.Printf("Found playlists: %+v\n", allPlaylists)
-
 	for _, p := range allPlaylists {
 		if p.Name == name {
 			return &p, nil
 		}
 	}
-
 
 	if skipCreation {
 		return nil, fmt.Errorf("playlist '%s' not found and creation was skipped", name)
