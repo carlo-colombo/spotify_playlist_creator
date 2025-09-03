@@ -2,7 +2,7 @@
 
 ## TLDR
 
-This program creates a Spotify playlist for the last songs of an artist. The artist's name is passed as a command-line argument. The program is run with `go run . <comma separated list of artists>`. It uses a SQLite database for caching to avoid hitting API rate limits and to speed up the process. The cache is stored in a local file named `spotify_playlist_creator.db`.
+This program creates a Spotify playlist for the last songs of an artist. The artist'''s name is passed as a command-line argument. The program is run with `go run . <comma separated list of artists>`. It uses a SQLite database for caching to avoid hitting API rate limits and to speed up the process. The cache is stored in a local file named `spotify_playlist_creator.db`.
 
 This program is designed to create and update Spotify playlists with the latest studio album tracks and recent singles from a user-defined list of artists.
 
@@ -31,3 +31,7 @@ This program is designed to create and update Spotify playlists with the latest 
         * Cellophane
         * Fingernails
         * Birthday Party 
+
+## Pre-commit Checks
+
+Before every commit, I will run `go build .` to ensure that the program compiles without errors. This helps to prevent broken commits.
