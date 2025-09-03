@@ -38,7 +38,8 @@ type SpotifyTrack struct {
 }
 
 type SpotifyAlbum struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	ReleaseDate string `json:"release_date"`
 }
 
 type SpotifyArtist struct {
@@ -59,4 +60,12 @@ type Release struct {
 	Title       string
 	Date        time.Time
 	TrackTitles []string
+}
+
+// Recap Structs
+type TrackDetails struct {
+	Title  string
+	Artist string
+	Album  string
+	Year   string
 }
