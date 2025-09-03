@@ -23,3 +23,17 @@ func cleanTrackTitle(title string) string {
 
 	return strings.TrimSpace(title)
 }
+
+// removeDuplicateStrings removes duplicate strings from a slice while preserving order.
+func removeDuplicateStrings(elements []string) []string {
+	encountered := map[string]bool{}
+	result := []string{}
+
+	for v := range elements {
+		if !encountered[elements[v]] {
+			encountered[elements[v]] = true
+			result = append(result, elements[v])
+		}
+	}
+	return result
+}

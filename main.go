@@ -43,17 +43,33 @@ func main() {
 
 	musicBrainzClient := setupMusicBrainzClient(db)
 
-	var allTrackURIs []string
 	var allTrackDetails []TrackDetails
 	for _, artistName := range artists {
 		fmt.Printf("Processing artist: %s\n", artistName)
-		trackURIs, trackDetails, err := processArtist(ctx, artistName, spotifyClient, musicBrainzClient)
+		artistTracks, err := processArtist(ctx, artistName, spotifyClient, musicBrainzClient)
 		if err != nil {
 			log.Printf("Error processing artist %s: %v", artistName, err)
 			continue
 		}
-		allTrackURIs = append(allTrackURIs, trackURIs...)
-		allTrackDetails = append(allTrackDetails, trackDetails...)
+		allTrackDetails = append(allTrackDetails, artistTracks...)
+	}
+
+	// Implement de-duplication by Title and Artist
+	uniqueTracks := make(map[string]TrackDetails)
+	var finalTrackDetails []TrackDetails
+	for _, track := range allTrackDetails {
+		key := fmt.Sprintf("%s|%s", strings.ToLower(track.Title), strings.ToLower(track.Artist))
+		if _, found := uniqueTracks[key]; !found {
+			uniqueTracks[key] = track
+			finalTrackDetails = append(finalTrackDetails, track)
+		}
+	}
+	allTrackDetails = finalTrackDetails // Update allTrackDetails to the de-duplicated list
+
+	// Extract URIs for Spotify API
+	var allTrackURIs []string
+	for _, track := range allTrackDetails {
+		allTrackURIs = append(allTrackURIs, track.URI)
 	}
 
 	if len(allTrackURIs) == 0 {
@@ -90,6 +106,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error getting or creating playlist: %v", err)
 	}
+
+	
 
 	err = spotifyClient.AddTracksToPlaylist(ctx, playlist.ID, allTrackURIs)
 	if err != nil {
@@ -152,22 +170,21 @@ func getArtists() ([]string, error) {
 	return artists, nil
 }
 
-func processArtist(ctx context.Context, artistName string, spotifyClient *SpotifyClient, musicBrainzClient *MusicBrainzClient) ([]string, []TrackDetails, error) {
+func processArtist(ctx context.Context, artistName string, spotifyClient *SpotifyClient, musicBrainzClient *MusicBrainzClient) ([]TrackDetails, error) {
 
 	// 1. Get artist ID from MusicBrainz
 	artistID, err := musicBrainzClient.GetArtistID(artistName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error getting artist ID for %s: %w", artistName, err)
+		return nil, fmt.Errorf("error getting artist ID for %s: %w", artistName, err)
 	}
 
 	// 2. Get releases from MusicBrainz
 	releases, err := musicBrainzClient.GetLatestReleases(artistID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error getting releases for %s: %w", artistName, err)
+		return nil, fmt.Errorf("error getting releases for %s: %w", artistName, err)
 	}
 
 	// 3. Get tracks from Spotify
-	var trackURIs []string
 	var trackDetailsList []TrackDetails
 	for _, release := range releases {
 		for _, trackTitle := range release.TrackTitles {
@@ -177,7 +194,6 @@ func processArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 				continue
 			}
 			if trackURI != "" {
-				trackURIs = append(trackURIs, trackURI)
 				// Get full track details for recap
 				track, err := spotifyClient.GetTrackDetails(ctx, trackURI)
 				if err != nil {
@@ -193,10 +209,11 @@ func processArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 					Artist: strings.Join(artistNames, ", "),
 					Album:  track.Album.Name,
 					Year:   track.Album.ReleaseDate[:4],
+					URI:    track.URI,
 				})
 			}
 		}
 	}
 
-	return trackURIs, trackDetailsList, nil
+	return trackDetailsList, nil
 }
