@@ -27,7 +27,7 @@ func setupSpotifyClient(ctx context.Context, db *Database) (*SpotifyClient, erro
 		ClientID:     os.Getenv("SPOTIFY_ID"),
 		ClientSecret: os.Getenv("SPOTIFY_SECRET"),
 		RedirectURL:  "http://127.0.0.1:8888/callback",
-		Scopes:       []string{"playlist-modify-private", "playlist-modify-public"},
+		Scopes:       []string{"playlist-modify-private", "playlist-modify-public", "playlist-read-private", "playlist-read-collaborative"},
 		Endpoint:     spotify.Endpoint,
 	}
 
@@ -141,39 +141,67 @@ func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album st
 	return "", nil // Not found
 }
 
-func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (*SpotifyPlaylist, error) {
+func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, skipCreation bool) (*SpotifyPlaylist, error) {
 	userID, err := c.getCurrentUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check if playlist already exists
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/users/%s/playlists", spotifyAPIBaseURL, userID), nil)
-	if err != nil {
-		return nil, err
+	var allPlaylists []SpotifyPlaylist
+	nextURL := fmt.Sprintf("%s/users/%s/playlists", spotifyAPIBaseURL, userID)
+
+	var req *http.Request
+	var resp *http.Response
+	for nextURL != "" {
+		req, err = http.NewRequestWithContext(ctx, "GET", nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err = c.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close() // Defer here is fine, as it's for the current 'resp' in this iteration
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		var playlists struct {
+			Items []SpotifyPlaylist `json:"items"`
+			Next  string            `json:"next"`
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("spotify get playlists failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&playlists); err != nil {
+			return nil, err
+		}
+
+		allPlaylists = append(allPlaylists, playlists.Items...)
+		nextURL = playlists.Next
 	}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	fmt.Printf("Found playlists: %+v\n", allPlaylists)
 
-	var playlists struct {
-		Items []SpotifyPlaylist `json:"items"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
-		return nil, err
-	}
-
-	for _, p := range playlists.Items {
+	for _, p := range allPlaylists {
 		if p.Name == name {
 			return &p, nil
 		}
 	}
 
+
+	if skipCreation {
+		return nil, fmt.Errorf("playlist '%s' not found and creation was skipped", name)
+	}
+
 	// Create playlist
+
 	createReqBody, _ := json.Marshal(map[string]interface{}{
 		"name":        name,
 		"public":      false,
@@ -186,14 +214,14 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (*
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err = c.client.Do(req)
+	creationResp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer creationResp.Body.Close()
 
 	var newPlaylist SpotifyPlaylist
-	if err := json.NewDecoder(resp.Body).Decode(&newPlaylist); err != nil {
+	if err := json.NewDecoder(creationResp.Body).Decode(&newPlaylist); err != nil {
 		return nil, err
 	}
 
