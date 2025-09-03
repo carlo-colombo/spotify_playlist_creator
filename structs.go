@@ -48,6 +48,9 @@ type SpotifyArtist struct {
 type SpotifyPlaylist struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	ExternalURLs struct {
+		Spotify string `json:"spotify"`
+	} `json:"external_urls"`
 }
 
 // App-specific Structs

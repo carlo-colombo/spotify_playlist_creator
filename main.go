@@ -79,17 +79,17 @@ func main() {
 		return
 	}
 
-	playlistID, err := spotifyClient.GetOrCreatePlaylist(ctx, playlistName)
+	playlist, err := spotifyClient.GetOrCreatePlaylist(ctx, playlistName)
 	if err != nil {
 		log.Fatalf("Error getting or creating playlist: %v", err)
 	}
 
-	err = spotifyClient.AddTracksToPlaylist(ctx, playlistID, allTrackURIs)
+	err = spotifyClient.AddTracksToPlaylist(ctx, playlist.ID, allTrackURIs)
 	if err != nil {
 		log.Fatalf("Error adding tracks to playlist: %v", err)
 	}
 
-	fmt.Printf("Successfully updated playlist '%s'.\n", playlistName)
+	fmt.Printf("Successfully updated playlist '%s'. You can find it here: %s\n", playlist.Name, playlist.ExternalURLs.Spotify)
 
 	fmt.Println("Spotify Playlist Creator finished.")
 }

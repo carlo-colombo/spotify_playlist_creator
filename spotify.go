@@ -141,21 +141,21 @@ func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album st
 	return "", nil // Not found
 }
 
-func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (string, error) {
+func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (*SpotifyPlaylist, error) {
 	userID, err := c.getCurrentUserID(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Check if playlist already exists
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/users/%s/playlists", spotifyAPIBaseURL, userID), nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -164,12 +164,12 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (s
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&playlists); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for _, p := range playlists.Items {
 		if p.Name == name {
-			return p.ID, nil
+			return &p, nil
 		}
 	}
 
@@ -182,22 +182,22 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (s
 
 	req, err = http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/users/%s/playlists", spotifyAPIBaseURL, userID), bytes.NewBuffer(createReqBody))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err = c.client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	var newPlaylist SpotifyPlaylist
 	if err := json.NewDecoder(resp.Body).Decode(&newPlaylist); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return newPlaylist.ID, nil
+	return &newPlaylist, nil
 }
 
 func (c *SpotifyClient) AddTracksToPlaylist(ctx context.Context, playlistID string, trackURIs []string) error {
