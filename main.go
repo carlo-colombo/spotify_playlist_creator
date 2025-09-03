@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -58,7 +59,8 @@ func main() {
 		return
 	}
 
-		playlistName := fmt.Sprintf("spc %s", strings.Join(artists, ","))
+			sort.Strings(artists)
+	playlistName := fmt.Sprintf("spc %s", strings.Join(artists, ","))
 
 	if *dryRun {
 		fmt.Printf("Dry run: Would create/update playlist '%s'. Tracks to be added:\n", playlistName)
