@@ -142,11 +142,6 @@ func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album st
 }
 
 func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (string, error) {
-	cacheKey := fmt.Sprintf("spotify:playlist:%s", name)
-	if cached, found := c.db.GetCache(cacheKey); found {
-		return cached, nil
-	}
-
 	userID, err := c.getCurrentUserID(ctx)
 	if err != nil {
 		return "", err
@@ -174,7 +169,6 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (s
 
 	for _, p := range playlists.Items {
 		if p.Name == name {
-			c.db.SetCache(cacheKey, p.ID, 3600*24) // Cache for 1 day
 			return p.ID, nil
 		}
 	}
@@ -203,7 +197,6 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string) (s
 		return "", err
 	}
 
-	c.db.SetCache(cacheKey, newPlaylist.ID, 3600*24) // Cache for 1 day
 	return newPlaylist.ID, nil
 }
 
