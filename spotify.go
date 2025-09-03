@@ -101,8 +101,7 @@ func getToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error)
 
 func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album string) (string, error) {
 	cacheKey := fmt.Sprintf("spotify:track:%s:%s:%s", title, artist, album)
-	if cached, found := c.db.GetCache(cacheKey);
- found {
+	if cached, found := c.db.GetCache(cacheKey); found {
 		return cached, nil
 	}
 

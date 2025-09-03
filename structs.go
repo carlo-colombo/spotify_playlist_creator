@@ -10,11 +10,11 @@ type MusicBrainzArtist struct {
 }
 
 type MusicBrainzReleaseGroup struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	PrimaryType string   `json:"primary-type"`
-	SecondaryTypes []string `json:"secondary-types"`
-	FirstReleaseDate string `json:"first-release-date"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	PrimaryType      string   `json:"primary-type"`
+	SecondaryTypes   []string `json:"secondary-types"`
+	FirstReleaseDate string   `json:"first-release-date"`
 }
 
 type MusicBrainzRelease struct {
@@ -30,10 +30,10 @@ type MusicBrainzTrack struct {
 
 // Spotify Structs
 type SpotifyTrack struct {
-	ID      string `json:"id"`
-	URI     string `json:"uri"`
-	Name    string `json:"name"`
-	Album   SpotifyAlbum `json:"album"`
+	ID      string          `json:"id"`
+	URI     string          `json:"uri"`
+	Name    string          `json:"name"`
+	Album   SpotifyAlbum    `json:"album"`
 	Artists []SpotifyArtist `json:"artists"`
 }
 

@@ -34,4 +34,4 @@ This program is designed to create and update Spotify playlists with the latest 
 
 ## Pre-commit Checks
 
-Before every commit, I will run `go build -o /dev/null .` to ensure that the program compiles without errors. This helps to prevent broken commits.
+Before every commit, I will run `go build -o /dev/null .` to ensure that the program compiles without errors and `go fmt ./...` to ensure that the files are correctly formatted. This helps to prevent broken commits.
