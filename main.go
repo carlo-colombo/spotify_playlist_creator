@@ -58,7 +58,7 @@ func main() {
 		return
 	}
 
-	playlistName := "Latest from My Artists"
+		playlistName := fmt.Sprintf("spc %s", strings.Join(artists, ","))
 
 	if *dryRun {
 		fmt.Printf("Dry run: Would create/update playlist '%s'. Tracks to be added:\n", playlistName)
