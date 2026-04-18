@@ -46,13 +46,17 @@ func main() {
 	var allTrackDetails []TrackDetails
 	for _, artistName := range artists {
 		fmt.Printf("Processing artist: %s\n", artistName)
-		artistTracks, err := processArtist(ctx, artistName, spotifyClient, musicBrainzClient)
+		debugLog("Processing artist: %s", artistName)
+	artistTracks, err := processArtist(ctx, artistName, spotifyClient, musicBrainzClient)
 		if err != nil {
 			log.Printf("Error processing artist %s: %v", artistName, err)
 			continue
 		}
+	debugLog("Found %d tracks for artist %s", len(artistTracks), artistName)
 		allTrackDetails = append(allTrackDetails, artistTracks...)
 	}
+
+	debugLog("Total tracks before dedup: %d", len(allTrackDetails))
 
 	// Implement de-duplication by Title and Artist
 	uniqueTracks := make(map[string]TrackDetails)
@@ -65,6 +69,8 @@ func main() {
 		}
 	}
 	allTrackDetails = finalTrackDetails // Update allTrackDetails to the de-duplicated list
+
+	debugLog("Total tracks after dedup: %d", len(allTrackDetails))
 
 	// Extract URIs for Spotify API
 	var allTrackURIs []string

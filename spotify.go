@@ -23,6 +23,8 @@ type SpotifyClient struct {
 }
 
 func setupSpotifyClient(ctx context.Context, db *Database) (*SpotifyClient, error) {
+	debugLog("Setting up Spotify client")
+
 	config := &oauth2.Config{
 		ClientID:     os.Getenv("SPOTIFY_ID"),
 		ClientSecret: os.Getenv("SPOTIFY_SECRET"),
@@ -53,6 +55,7 @@ func getToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error)
 	tokenFile := fmt.Sprintf("%s/token.json", tokenCacheDir)
 
 	// Try to get token from cache
+	debugLog("Spotify: Checking token cache")
 	if _, err := os.Stat(tokenFile); err == nil {
 		file, err := os.Open(tokenFile)
 		if err == nil {
@@ -61,8 +64,10 @@ func getToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error)
 			if err := json.NewDecoder(file).Decode(&token); err == nil {
 				// Check if the token is expired
 				if token.Valid() {
+					debugLog("Spotify: Using cached token")
 					return &token, nil
 				}
+				debugLog("Spotify: Cached token expired, refreshing")
 			}
 		}
 	}
@@ -83,6 +88,7 @@ func getToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error)
 	go http.ListenAndServe(":8888", nil)
 
 	authCode := <-code
+	debugLog("Spotify: Received auth code, exchanging for token")
 
 	token, err := config.Exchange(ctx, authCode)
 	if err != nil {
@@ -100,12 +106,17 @@ func getToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error)
 }
 
 func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album string) (string, error) {
+	debugLog("Spotify: Searching for track '%s' by '%s' from album '%s'", title, artist, album)
+
 	cacheKey := fmt.Sprintf("spotify:track:%s:%s:%s", title, artist, album)
 	if cached, found := c.db.GetCache(cacheKey); found {
+		debugLog("Spotify: Cache hit for track '%s'", title)
 		return cached, nil
 	}
 
 	query := fmt.Sprintf("track:%s artist:%s album:%s", cleanTrackTitle(title), artist, album)
+	debugLog("Spotify: Query: %s", query)
+
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/search?q=%s&type=track", spotifyAPIBaseURL, url.QueryEscape(query)), nil)
 	if err != nil {
 		return "", err
@@ -134,10 +145,12 @@ func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album st
 
 	if len(searchResult.Tracks.Items) > 0 {
 		trackURI := searchResult.Tracks.Items[0].URI
+		debugLog("Spotify: Found track '%s' -> %s", title, trackURI)
 		c.db.SetCache(cacheKey, trackURI, 3600*24*7) // Cache for 1 week
 		return trackURI, nil
 	}
 
+	debugLog("Spotify: No track found for '%s' by '%s'", title, artist)
 	return "", nil // Not found
 }
 

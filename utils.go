@@ -1,9 +1,19 @@
 package main
 
 import (
+	"log"
+	"os"
 	"regexp"
 	"strings"
 )
+
+var debugEnabled = os.Getenv("DEBUG") != ""
+
+func debugLog(format string, args ...interface{}) {
+	if debugEnabled {
+		log.Printf("DEBUG: "+format, args...)
+	}
+}
 
 func cleanTrackTitle(title string) string {
 	// Remove featuring artists

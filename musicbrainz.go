@@ -28,6 +28,8 @@ func setupMusicBrainzClient(db *Database) *MusicBrainzClient {
 }
 
 func (c *MusicBrainzClient) GetArtistID(artistName string) (string, error) {
+	debugLog("MusicBrainz: Looking up artist ID for: %s", artistName)
+
 	// Handle disambiguation for specific artists
 	if artistName == "wargasm" {
 		artistName = "WARGASM (UK)"
@@ -35,8 +37,11 @@ func (c *MusicBrainzClient) GetArtistID(artistName string) (string, error) {
 
 	cacheKey := fmt.Sprintf("musicbrainz:artist:%s", artistName)
 	if cached, found := c.db.GetCache(cacheKey); found {
+		debugLog("MusicBrainz: Cache hit for artist ID: %s", cached)
 		return cached, nil
 	}
+
+	debugLog("MusicBrainz: Cache miss, making API request for artist: %s", artistName)
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/artist?query=%s&fmt=json", musicBrainzAPIBaseURL, url.QueryEscape(artistName)), nil)
 	if err != nil {
@@ -59,6 +64,7 @@ func (c *MusicBrainzClient) GetArtistID(artistName string) (string, error) {
 
 	if len(artists.Artists) > 0 {
 		artistID := artists.Artists[0].ID
+		debugLog("MusicBrainz: Found artist ID: %s", artistID)
 		c.db.SetCache(cacheKey, artistID, 3600*24*30) // Cache for 30 days
 		return artistID, nil
 	}
@@ -67,6 +73,8 @@ func (c *MusicBrainzClient) GetArtistID(artistName string) (string, error) {
 }
 
 func (c *MusicBrainzClient) GetLatestReleases(artistID string) ([]Release, error) {
+	debugLog("MusicBrainz: Getting latest releases for artist ID: %s", artistID)
+
 	cacheKey := fmt.Sprintf("musicbrainz:releases:%s", artistID)
 	if cached, found := c.db.GetCache(cacheKey); found {
 		var releases []Release
@@ -112,7 +120,9 @@ func (c *MusicBrainzClient) getAllReleases(artistID string) ([]MusicBrainzReleas
 	limit := 100
 
 	for {
-		req, err := http.NewRequest("GET", fmt.Sprintf("%s/release-group?artist=%s&fmt=json&limit=%d&offset=%d", musicBrainzAPIBaseURL, artistID, limit, offset), nil)
+		trackUrl := fmt.Sprintf("%s/release-group?artist=%s&fmt=json&limit=%d&offset=%d", musicBrainzAPIBaseURL, artistID, limit, offset)
+		log.Printf("Fetching releases with URL: %s", trackUrl)
+		req, err := http.NewRequest("GET", trackUrl, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -143,10 +153,33 @@ func (c *MusicBrainzClient) getAllReleases(artistID string) ([]MusicBrainzReleas
 }
 
 func (c *MusicBrainzClient) filterReleases(releases []MusicBrainzReleaseGroup) (*Release, []Release) {
+	debugLog("MusicBrainz: Filtering %d total releases", len(releases))
+
+	// Filter out future releases
+	now := time.Now()
+
 	var studioAlbums []MusicBrainzReleaseGroup
 	var singles []MusicBrainzReleaseGroup
+	var filteredOut []string
 
 	for _, r := range releases {
+		// Skip releases with future dates
+		releaseDate, err := time.Parse("2006-01-02", r.FirstReleaseDate)
+		if err != nil {
+			// Try parsing just year
+			if len(r.FirstReleaseDate) == 4 {
+				releaseDate, err = time.Parse("2006", r.FirstReleaseDate)
+			}
+			if err != nil {
+				filteredOut = append(filteredOut, fmt.Sprintf("%s: %s (invalid date)", r.PrimaryType, r.Title))
+				continue
+			}
+		}
+		if releaseDate.After(now) {
+			filteredOut = append(filteredOut, fmt.Sprintf("%s: %s (future: %s)", r.PrimaryType, r.Title, r.FirstReleaseDate))
+			continue
+		}
+
 		isStudioAlbum := r.PrimaryType == "Album" && !contains(r.SecondaryTypes, "Live") && !contains(r.SecondaryTypes, "Compilation")
 		isSingle := r.PrimaryType == "Single"
 
@@ -154,6 +187,33 @@ func (c *MusicBrainzClient) filterReleases(releases []MusicBrainzReleaseGroup) (
 			studioAlbums = append(studioAlbums, r)
 		} else if isSingle && !isLiveOrRemix(r.Title) {
 			singles = append(singles, r)
+		} else {
+			reason := "other"
+			if r.PrimaryType == "Album" {
+				if contains(r.SecondaryTypes, "Live") {
+					reason = "Album (Live)"
+				} else if contains(r.SecondaryTypes, "Compilation") {
+					reason = "Album (Compilation)"
+				} else {
+					reason = "Album (other)"
+				}
+			} else if r.PrimaryType == "Single" {
+				if isLiveOrRemix(r.Title) {
+					reason = "Single (Live/Remix)"
+				} else {
+					reason = "Single (before latest album)"
+				}
+			} else {
+				reason = fmt.Sprintf("%s", r.PrimaryType)
+			}
+			filteredOut = append(filteredOut, fmt.Sprintf("%s: %s (%s)", reason, r.Title, r.FirstReleaseDate))
+		}
+	}
+
+	debugLog("MusicBrainz: Found %d studio albums, %d singles, filtered out %d releases", len(studioAlbums), len(singles), len(filteredOut))
+	if len(filteredOut) > 0 && debugEnabled {
+		for _, f := range filteredOut {
+			debugLog("MusicBrainz:   Filtered: %s", f)
 		}
 	}
 
