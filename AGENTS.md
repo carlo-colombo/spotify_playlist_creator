@@ -1,46 +1,54 @@
-# Spotify Playlist Creator Agent
+# Spotify Playlist Creator
 
-This agent creates a Spotify playlist with the latest album from a list of artists.
+A web application that creates Spotify playlists with the latest releases from your favorite artists.
 
 ## How to Use
 
 1.  **Set Environment Variables:**
 
-    Before running the agent, you need to set your Spotify API credentials as environment variables. Open your terminal and run the following commands, replacing `your_client_id` and `your_client_secret` with your actual credentials:
-
     ```bash
     export SPOTIFY_ID="your_client_id"
     export SPOTIFY_SECRET="your_client_secret"
+    export SPOTIFY_REDIRECT_URL="http://127.0.0.1:8080/auth/callback"
     ```
 
-2.  **Run the Agent:**
-
-    Once the environment variables are set, you can run the agent using the following command:
+2.  **Run the Web Server:**
 
     ```bash
     go run main.go
     ```
 
-3.  **Provide Artists:**
+3.  **Open in Browser:**
 
-    The agent will prompt you to enter a comma-separated list of artists. Type the names of the artists you want to include in the playlist and press Enter.
+    Go to http://localhost:8080
 
-    ```
-    Enter a comma-separated list of artists:
-    Rammstein, Linkin Park, Muse
-    ```
+4.  **Connect Spotify:**
+
+    Click "Connect Spotify" to authenticate with your Spotify account.
+
+5.  **Add Artists:**
+
+    Enter artist names in the input field. The app fetches their latest releases from MusicBrainz.
+
+6.  **Create Playlist:**
+
+    Review the albums and songs, remove any you don't want, then click "Create Playlist".
 
 ## Example
-
-Here is an example of how to run the agent and the expected output:
 
 ```bash
 $ export SPOTIFY_ID="your_client_id"
 $ export SPOTIFY_SECRET="your_client_secret"
+$ export SPOTIFY_REDIRECT_URL="http://127.0.0.1:8080/auth/callback"
 $ go run main.go
-Enter a comma-separated list of artists:
-Rammstein
-Found artist: Rammstein
-Latest album: Zeit by Rammstein
-Successfully created playlist! View it here: https://open.spotify.com/playlist/your_playlist_id
+Starting Spotify Playlist Creator web server on http://localhost:8080
 ```
+
+Then open http://localhost:8080 in your browser.
+
+## Features
+
+- **Integrated Albums & Songs UI** — Songs are grouped by album with remove buttons for both
+- **Canonical Artist Names** — Uses real artist names from MusicBrainz, sorted alphabetically for playlist name
+- **Multi-session Support** — Each browser tab is an independent session
+- **SQLite Caching** — API responses are cached locally to avoid rate limits
