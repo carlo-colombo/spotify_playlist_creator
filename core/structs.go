@@ -1,4 +1,4 @@
-package main
+package core
 
 import "time"
 
@@ -60,9 +60,16 @@ type Release struct {
 	Title       string
 	Date        time.Time
 	TrackTitles []string
+	Artist      string
 }
 
-// Recap Structs
+// SongWithRelease wraps TrackDetails with release info
+type SongWithRelease struct {
+	TrackDetails
+	ReleaseTitle string
+}
+
+// TrackDetails holds track information for the playlist
 type TrackDetails struct {
 	Title  string
 	Artist string

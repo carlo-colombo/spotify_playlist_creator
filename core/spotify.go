@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"bytes"
@@ -10,114 +10,101 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/spotify"
 )
 
-const spotifyAPIBaseURL = "https://api.spotify.com/v1"
+const SpotifyAPIBaseURL = "https://api.spotify.com/v1"
 
+// SpotifyClient wraps Spotify API interactions
 type SpotifyClient struct {
-	client *http.Client
-	db     *Database
+	client         *http.Client
+	db             *Database
+	sessionID      string
+	authenticated  bool
 }
 
-func setupSpotifyClient(ctx context.Context, db *Database) (*SpotifyClient, error) {
-	debugLog("Setting up Spotify client")
+// NewSpotifyClient creates a new Spotify client for a session
+func NewSpotifyClient(db *Database, sessionID string) *SpotifyClient {
+	return &SpotifyClient{
+		db:        db,
+		sessionID: sessionID,
+	}
+}
+
+// IsAuthenticated returns whether the client has a valid token
+func (c *SpotifyClient) IsAuthenticated() bool {
+	return c.authenticated && c.client != nil
+}
+
+// EnsureAuthenticated checks and loads token if needed
+func (c *SpotifyClient) EnsureAuthenticated(ctx context.Context) error {
+	if c.client != nil && c.authenticated {
+		return nil
+	}
+
+	// Load token from database
+	tokenJSON, found := c.db.GetCache(fmt.Sprintf("spotify:token:%s", c.sessionID))
+	if !found {
+		return fmt.Errorf("not authenticated: no token found for session")
+	}
+
+	var token oauth2.Token
+	if err := json.Unmarshal([]byte(tokenJSON), &token); err != nil {
+		return fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	// Check if token is expired and refresh if needed
+	if !token.Valid() && token.RefreshToken != "" {
+		var err error
+		newToken, err := c.refreshToken(ctx, &token)
+		if err != nil {
+			return fmt.Errorf("failed to refresh token: %w", err)
+		}
+		token = *newToken
+		// Store refreshed token
+		tokenJSON, _ := json.Marshal(token)
+		c.db.SetCache(fmt.Sprintf("spotify:token:%s", c.sessionID), string(tokenJSON), int64(token.Expiry.Sub(time.Now()).Seconds()))
+	}
 
 	config := &oauth2.Config{
 		ClientID:     os.Getenv("SPOTIFY_ID"),
 		ClientSecret: os.Getenv("SPOTIFY_SECRET"),
-		RedirectURL:  "http://127.0.0.1:8888/callback",
-		Scopes:       []string{"playlist-modify-private", "playlist-modify-public", "playlist-read-private", "playlist-read-collaborative"},
 		Endpoint:     spotify.Endpoint,
 	}
 
-	// Get token from cache or from web
-	token, err := getToken(ctx, config)
-	if err != nil {
-		return nil, err
-	}
-
-	client := config.Client(ctx, token)
-	return &SpotifyClient{client: client, db: db}, nil
+	c.client = config.Client(ctx, &token)
+	c.authenticated = true
+	return nil
 }
 
-func getToken(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
-	cacheDir, err := os.UserCacheDir()
+func (c *SpotifyClient) refreshToken(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
+	config := &oauth2.Config{
+		ClientID:     os.Getenv("SPOTIFY_ID"),
+		ClientSecret: os.Getenv("SPOTIFY_SECRET"),
+		Endpoint:     spotify.Endpoint,
+	}
+
+	source := config.TokenSource(ctx, token)
+	newToken, err := source.Token()
 	if err != nil {
 		return nil, err
 	}
-	tokenCacheDir := fmt.Sprintf("%s/spotify_playlist_creator", cacheDir)
-	if _, err := os.Stat(tokenCacheDir); os.IsNotExist(err) {
-		os.MkdirAll(tokenCacheDir, 0700)
-	}
-	tokenFile := fmt.Sprintf("%s/token.json", tokenCacheDir)
-
-	// Try to get token from cache
-	debugLog("Spotify: Checking token cache")
-	if _, err := os.Stat(tokenFile); err == nil {
-		file, err := os.Open(tokenFile)
-		if err == nil {
-			defer file.Close()
-			var token oauth2.Token
-			if err := json.NewDecoder(file).Decode(&token); err == nil {
-				// Check if the token is expired
-				if token.Valid() {
-					debugLog("Spotify: Using cached token")
-					return &token, nil
-				}
-				debugLog("Spotify: Cached token expired, refreshing")
-			}
-		}
-	}
-
-	// If token not in cache or expired, get it from web
-	url := config.AuthCodeURL("state", oauth2.AccessTypeOffline)
-	fmt.Printf("Your browser has been opened to visit the following page:\n%s\n", url)
-
-	// Open browser
-	// open.Run(url)
-
-	// Wait for authorization code
-	code := make(chan string)
-	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		code <- r.URL.Query().Get("code")
-		fmt.Fprintf(w, "You can close this window now.")
-	})
-	go http.ListenAndServe(":8888", nil)
-
-	authCode := <-code
-	debugLog("Spotify: Received auth code, exchanging for token")
-
-	token, err := config.Exchange(ctx, authCode)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the new token
-	file, err := os.Create(tokenFile)
-	if err == nil {
-		defer file.Close()
-		json.NewEncoder(file).Encode(token)
-	}
-
-	return token, nil
+	return newToken, nil
 }
 
+// SearchTrack searches for a track on Spotify
 func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album string) (string, error) {
-	debugLog("Spotify: Searching for track '%s' by '%s' from album '%s'", title, artist, album)
-
 	cacheKey := fmt.Sprintf("spotify:track:%s:%s:%s", title, artist, album)
 	if cached, found := c.db.GetCache(cacheKey); found {
-		debugLog("Spotify: Cache hit for track '%s'", title)
 		return cached, nil
 	}
 
 	query := fmt.Sprintf("track:%s artist:%s album:%s", cleanTrackTitle(title), artist, album)
-	debugLog("Spotify: Query: %s", query)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/search?q=%s&type=track", spotifyAPIBaseURL, url.QueryEscape(query)), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/search?q=%s&type=track", SpotifyAPIBaseURL, url.QueryEscape(query)), nil)
 	if err != nil {
 		return "", err
 	}
@@ -145,15 +132,14 @@ func (c *SpotifyClient) SearchTrack(ctx context.Context, title, artist, album st
 
 	if len(searchResult.Tracks.Items) > 0 {
 		trackURI := searchResult.Tracks.Items[0].URI
-		debugLog("Spotify: Found track '%s' -> %s", title, trackURI)
 		c.db.SetCache(cacheKey, trackURI, 3600*24*7) // Cache for 1 week
 		return trackURI, nil
 	}
 
-	debugLog("Spotify: No track found for '%s' by '%s'", title, artist)
-	return "", nil // Not found
+	return "", nil
 }
 
+// GetOrCreatePlaylist gets or creates a playlist
 func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, skipCreation bool) (*SpotifyPlaylist, error) {
 	userID, err := c.getCurrentUserID(ctx)
 	if err != nil {
@@ -162,7 +148,7 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, sk
 
 	// Check if playlist already exists
 	var allPlaylists []SpotifyPlaylist
-	nextURL := fmt.Sprintf("%s/users/%s/playlists", spotifyAPIBaseURL, userID)
+	nextURL := fmt.Sprintf("%s/users/%s/playlists", SpotifyAPIBaseURL, userID)
 
 	var req *http.Request
 	var resp *http.Response
@@ -176,7 +162,7 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, sk
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close() // Defer here is fine, as it's for the current 'resp' in this iteration
+		defer resp.Body.Close()
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -211,14 +197,13 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, sk
 	}
 
 	// Create playlist
-
 	createReqBody, _ := json.Marshal(map[string]interface{}{
 		"name":        name,
 		"public":      false,
 		"description": "Playlist created by Spotify Playlist Creator",
 	})
 
-	req, err = http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/users/%s/playlists", spotifyAPIBaseURL, userID), bytes.NewBuffer(createReqBody))
+	req, err = http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/users/%s/playlists", SpotifyAPIBaseURL, userID), bytes.NewBuffer(createReqBody))
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +223,7 @@ func (c *SpotifyClient) GetOrCreatePlaylist(ctx context.Context, name string, sk
 	return &newPlaylist, nil
 }
 
+// AddTracksToPlaylist adds tracks to a playlist
 func (c *SpotifyClient) AddTracksToPlaylist(ctx context.Context, playlistID string, trackURIs []string) error {
 	existingTracks, err := c.getPlaylistTracks(ctx, playlistID)
 	if err != nil {
@@ -259,7 +245,7 @@ func (c *SpotifyClient) AddTracksToPlaylist(ctx context.Context, playlistID stri
 	}
 
 	if len(tracksToAdd) == 0 {
-		return nil // No new tracks to add
+		return nil
 	}
 
 	// Batch track additions (100 tracks per request)
@@ -274,7 +260,7 @@ func (c *SpotifyClient) AddTracksToPlaylist(ctx context.Context, playlistID stri
 			"uris": batch,
 		})
 
-		req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/playlists/%s/tracks", spotifyAPIBaseURL, playlistID), bytes.NewBuffer(reqBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/playlists/%s/tracks", SpotifyAPIBaseURL, playlistID), bytes.NewBuffer(reqBody))
 		if err != nil {
 			return err
 		}
@@ -299,7 +285,7 @@ func (c *SpotifyClient) getPlaylistTracks(ctx context.Context, playlistID string
 	limit := 100
 
 	for {
-		req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/playlists/%s/tracks?limit=%d&offset=%d", spotifyAPIBaseURL, playlistID, limit, offset), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/playlists/%s/tracks?limit=%d&offset=%d", SpotifyAPIBaseURL, playlistID, limit, offset), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +320,7 @@ func (c *SpotifyClient) getPlaylistTracks(ctx context.Context, playlistID string
 }
 
 func (c *SpotifyClient) getCurrentUserID(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/me", spotifyAPIBaseURL), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/me", SpotifyAPIBaseURL), nil)
 	if err != nil {
 		return "", err
 	}
@@ -356,9 +342,10 @@ func (c *SpotifyClient) getCurrentUserID(ctx context.Context) (string, error) {
 	return user.ID, nil
 }
 
+// GetTrackDetails retrieves full track metadata
 func (c *SpotifyClient) GetTrackDetails(ctx context.Context, trackURI string) (*SpotifyTrack, error) {
 	trackID := strings.TrimPrefix(trackURI, "spotify:track:")
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/tracks/%s", spotifyAPIBaseURL, trackID), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/tracks/%s", SpotifyAPIBaseURL, trackID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -380,4 +367,29 @@ func (c *SpotifyClient) GetTrackDetails(ctx context.Context, trackURI string) (*
 	}
 
 	return &track, nil
+}
+
+func cleanTrackTitle(title string) string {
+	// Remove featuring artists
+	if idx := strings.Index(title, " feat."); idx != -1 {
+		title = title[:idx]
+	}
+	if idx := strings.Index(title, " ft."); idx != -1 {
+		title = title[:idx]
+	}
+	if idx := strings.Index(title, " featuring"); idx != -1 {
+		title = title[:idx]
+	}
+
+	// Remove remix indicators
+	title = strings.ReplaceAll(title, " (Remix)", "")
+	title = strings.ReplaceAll(title, " (Radio Edit)", "")
+	title = strings.ReplaceAll(title, " - Remastered", "")
+	title = strings.ReplaceAll(title, " (Live)", "")
+
+	// Normalize various delimiters to spaces
+	title = strings.ReplaceAll(title, "/", " ")
+	title = strings.ReplaceAll(title, "-", " ")
+
+	return strings.TrimSpace(title)
 }

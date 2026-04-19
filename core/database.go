@@ -1,8 +1,7 @@
-package main
+package core
 
 import (
 	"database/sql"
-
 	"os"
 	"path/filepath"
 	"time"
@@ -10,11 +9,13 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// Database wraps sql.DB for caching
 type Database struct {
 	db *sql.DB
 }
 
-func setupDatabase() (*Database, error) {
+// NewDatabase creates a new database connection
+func NewDatabase() (*Database, error) {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		return nil, err
@@ -45,6 +46,7 @@ func setupDatabase() (*Database, error) {
 	return &Database{db: db}, nil
 }
 
+// GetCache retrieves a cached value
 func (d *Database) GetCache(key string) (string, bool) {
 	var value string
 	var expiry int64
@@ -55,7 +57,6 @@ func (d *Database) GetCache(key string) (string, bool) {
 	}
 
 	if time.Now().Unix() > expiry {
-		// Expired
 		d.db.Exec("DELETE FROM cache WHERE key = ?", key)
 		return "", false
 	}
@@ -63,12 +64,14 @@ func (d *Database) GetCache(key string) (string, bool) {
 	return value, true
 }
 
+// SetCache stores a value with TTL
 func (d *Database) SetCache(key, value string, ttlSeconds int64) error {
 	expiry := time.Now().Unix() + ttlSeconds
 	_, err := d.db.Exec("INSERT OR REPLACE INTO cache (key, value, expiry) VALUES (?, ?, ?)", key, value, expiry)
 	return err
 }
 
+// Close closes the database connection
 func (d *Database) Close() {
 	d.db.Close()
 }
