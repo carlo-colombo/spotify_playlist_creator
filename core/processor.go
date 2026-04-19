@@ -9,8 +9,9 @@ import (
 
 // ArtistResult holds releases and songs for an artist
 type ArtistResult struct {
-	Releases []Release
-	Songs    []SongWithRelease
+	CanonicalName string // Real artist name from MusicBrainz
+	Releases      []Release
+	Songs         []SongWithRelease
 }
 
 // ProcessArtist processes an artist and returns their releases and songs
@@ -20,8 +21,8 @@ func ProcessArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 		return nil, fmt.Errorf("spotify not authenticated: %w", err)
 	}
 
-	// 1. Get artist ID from MusicBrainz
-	artistID, err := musicBrainzClient.GetArtistID(artistName)
+	// 1. Get artist ID and canonical name from MusicBrainz
+	artistID, canonicalName, err := musicBrainzClient.GetArtistIDAndName(artistName)
 	if err != nil {
 		return nil, fmt.Errorf("error getting artist ID for %s: %w", artistName, err)
 	}
@@ -34,7 +35,7 @@ func ProcessArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 
 	// Set artist name on releases
 	for i := range releases {
-		releases[i].Artist = artistName
+		releases[i].Artist = canonicalName
 	}
 
 	// 3. Get tracks from Spotify
@@ -76,7 +77,8 @@ func ProcessArtist(ctx context.Context, artistName string, spotifyClient *Spotif
 	}
 
 	return &ArtistResult{
-		Releases: releases,
-		Songs:    songs,
+		CanonicalName: canonicalName,
+		Releases:      releases,
+		Songs:         songs,
 	}, nil
 }

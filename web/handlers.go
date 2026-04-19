@@ -20,15 +20,16 @@ import (
 
 // Session holds per-session data
 type Session struct {
-	ID            string
-	Artists       []string
-	Releases      map[string][]core.Release  // artist -> releases
-	Songs         []core.SongWithRelease
-	PlaylistURL   string
-	PlaylistName  string
-	SpotifyClient *core.SpotifyClient
-	MusicBrainz   *core.MusicBrainzClient
-	CreatedAt     time.Time
+	ID             string
+	Artists        []string
+	CanonicalNames map[string]string         // user input -> canonical name
+	Releases       map[string][]core.Release // artist -> releases
+	Songs          []core.SongWithRelease
+	PlaylistURL    string
+	PlaylistName   string
+	SpotifyClient  *core.SpotifyClient
+	MusicBrainz    *core.MusicBrainzClient
+	CreatedAt      time.Time
 }
 
 // SessionStore manages sessions
@@ -83,7 +84,7 @@ type SpotifyConfig struct {
 
 func NewHandlers(db *core.Database, sessions *SessionStore) *Handlers {
 	templates := template.Must(template.New("").Parse(IndexHTML))
-	
+
 	return &Handlers{
 		db:        db,
 		sessions:  sessions,
@@ -132,23 +133,23 @@ func (h *Handlers) Home(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		SessionID        string
-		IsAuthenticated  bool
-		Artists          []string
-		CachedArtists    []string
-		Releases         map[string][]core.Release
-		Songs            []core.SongWithRelease
-		PlaylistName     string
-		PlaylistURL      string
+		SessionID       string
+		IsAuthenticated bool
+		Artists         []string
+		CachedArtists   []string
+		Releases        map[string][]core.Release
+		Songs           []core.SongWithRelease
+		PlaylistName    string
+		PlaylistURL     string
 	}{
-		SessionID:        sessionID,
-		IsAuthenticated:  isAuthenticated,
-		Artists:          session.Artists,
-		CachedArtists:    cachedArtists,
-		Releases:         session.Releases,
-		Songs:            session.Songs,
-		PlaylistName:     session.PlaylistName,
-		PlaylistURL:      session.PlaylistURL,
+		SessionID:       sessionID,
+		IsAuthenticated: isAuthenticated,
+		Artists:         session.Artists,
+		CachedArtists:   cachedArtists,
+		Releases:        session.Releases,
+		Songs:           session.Songs,
+		PlaylistName:    computePlaylistName(session.Artists, session.CanonicalNames),
+		PlaylistURL:     session.PlaylistURL,
 	}
 
 	h.templates.Execute(w, data)
@@ -325,18 +326,30 @@ func (h *Handlers) APIArtistsAdd(w http.ResponseWriter, r *http.Request) {
 	if session.Releases == nil {
 		session.Releases = make(map[string][]core.Release)
 	}
+	if session.CanonicalNames == nil {
+		session.CanonicalNames = make(map[string]string)
+	}
 
 	// Add to session
 	session.Artists = append(session.Artists, req.Artist)
+	session.CanonicalNames[req.Artist] = result.CanonicalName
 	session.Releases[req.Artist] = result.Releases
 	session.Songs = append(session.Songs, result.Songs...)
 
 	// Deduplicate songs
 	session.Songs = deduplicateSongs(session.Songs)
 
-	// Update playlist name
-	sort.Strings(session.Artists)
-	session.PlaylistName = fmt.Sprintf("spc %s", strings.Join(session.Artists, ","))
+	// Update playlist name using canonical names, sorted alphabetically
+	var canonicalList []string
+	for _, name := range session.Artists {
+		if canonical, ok := session.CanonicalNames[name]; ok && canonical != "" {
+			canonicalList = append(canonicalList, canonical)
+		} else {
+			canonicalList = append(canonicalList, name)
+		}
+	}
+	sort.Strings(canonicalList)
+	session.PlaylistName = fmt.Sprintf("spc %s", strings.Join(canonicalList, ","))
 
 	// Update cached artists history
 	h.updateArtistsHistory(req.Artist)
@@ -381,6 +394,11 @@ func (h *Handlers) APIArtistsRemove(w http.ResponseWriter, r *http.Request) {
 		delete(session.Releases, artist)
 	}
 
+	// Remove from canonical names
+	if session.CanonicalNames != nil {
+		delete(session.CanonicalNames, artist)
+	}
+
 	var newArtists []string
 	for _, a := range session.Artists {
 		if !strings.EqualFold(a, artist) {
@@ -389,10 +407,18 @@ func (h *Handlers) APIArtistsRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	session.Artists = newArtists
 
-	// Update playlist name
+	// Update playlist name using canonical names, sorted alphabetically
 	if len(session.Artists) > 0 {
-		sort.Strings(session.Artists)
-		session.PlaylistName = fmt.Sprintf("spc %s", strings.Join(session.Artists, ","))
+		var canonicalList []string
+		for _, a := range session.Artists {
+			if canonical, ok := session.CanonicalNames[a]; ok && canonical != "" {
+				canonicalList = append(canonicalList, canonical)
+			} else {
+				canonicalList = append(canonicalList, a)
+			}
+		}
+		sort.Strings(canonicalList)
+		session.PlaylistName = fmt.Sprintf("spc %s", strings.Join(canonicalList, ","))
 	} else {
 		session.PlaylistName = ""
 	}
@@ -506,7 +532,7 @@ func (h *Handlers) APIPlaylistStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, _ := h.sessions.Get(sessionID)
-	
+
 	// Check authentication via database token
 	isAuth := false
 	if tokenJSON, found := h.db.GetCache(fmt.Sprintf("spotify:token:%s", sessionID)); found && tokenJSON != "" {
@@ -597,7 +623,7 @@ func (h *Handlers) APIReleasesRemove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Artist      string `json:"artist"`
+		Artist       string `json:"artist"`
 		ReleaseTitle string `json:"release_title"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -650,6 +676,23 @@ func deduplicateSongs(songs []core.SongWithRelease) []core.SongWithRelease {
 		}
 	}
 	return result
+}
+
+// computePlaylistName generates playlist name from canonical names, sorted alphabetically
+func computePlaylistName(artists []string, canonicalNames map[string]string) string {
+	if len(artists) == 0 {
+		return ""
+	}
+	var canonicalList []string
+	for _, artist := range artists {
+		if canonical, ok := canonicalNames[artist]; ok && canonical != "" {
+			canonicalList = append(canonicalList, canonical)
+		} else {
+			canonicalList = append(canonicalList, artist)
+		}
+	}
+	sort.Strings(canonicalList)
+	return fmt.Sprintf("spc %s", strings.Join(canonicalList, ","))
 }
 
 func generateSessionID() string {

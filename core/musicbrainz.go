@@ -68,6 +68,47 @@ func (c *MusicBrainzClient) GetArtistID(artistName string) (string, error) {
 	return "", fmt.Errorf("artist not found: %s", artistName)
 }
 
+// GetArtistIDAndName retrieves the MusicBrainz artist ID and canonical name
+func (c *MusicBrainzClient) GetArtistIDAndName(artistName string) (string, string, error) {
+	// Handle disambiguation for specific artists
+	if strings.ToLower(artistName) == "wargasm" {
+		artistName = "WARGASM (UK)"
+	}
+
+	cacheKey := fmt.Sprintf("musicbrainz:artist:%s", artistName)
+	if cached, found := c.db.GetCache(cacheKey); found {
+		return cached, "", nil
+	}
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/artist?query=%s&fmt=json", musicBrainzAPIBaseURL, url.QueryEscape(artistName)), nil)
+	if err != nil {
+		return "", "", err
+	}
+
+	resp, err := c.doRequestWithRateLimit(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	var artists struct {
+		Artists []MusicBrainzArtist `json:"artists"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&artists); err != nil {
+		return "", "", err
+	}
+
+	if len(artists.Artists) > 0 {
+		artistID := artists.Artists[0].ID
+		canonicalName := artists.Artists[0].Name
+		c.db.SetCache(cacheKey, artistID, 3600*24*30) // Cache for 30 days
+		return artistID, canonicalName, nil
+	}
+
+	return "", "", fmt.Errorf("artist not found: %s", artistName)
+}
+
 // GetLatestReleases retrieves the latest releases for an artist
 func (c *MusicBrainzClient) GetLatestReleases(artistID string) ([]Release, error) {
 	cacheKey := fmt.Sprintf("musicbrainz:releases:%s", artistID)
@@ -261,7 +302,7 @@ func (c *MusicBrainzClient) getTrackTitles(releaseID string, addedTracks map[str
 
 func (c *MusicBrainzClient) doRequestWithRateLimit(req *http.Request) (*http.Response, error) {
 	req.Header.Set("User-Agent", "SpotifyPlaylistCreator/1.0 (contact@example.com)")
-	
+
 	maxRetries := 5
 	for i := 0; i < maxRetries; i++ {
 		resp, err := c.client.Do(req)

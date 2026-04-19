@@ -20,10 +20,10 @@ const SpotifyAPIBaseURL = "https://api.spotify.com/v1"
 
 // SpotifyClient wraps Spotify API interactions
 type SpotifyClient struct {
-	client         *http.Client
-	db             *Database
-	sessionID      string
-	authenticated  bool
+	client        *http.Client
+	db            *Database
+	sessionID     string
+	authenticated bool
 }
 
 // NewSpotifyClient creates a new Spotify client for a session
